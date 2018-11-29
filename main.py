@@ -4,28 +4,33 @@ wrap firefox into asyncore server to send annoying alerts via telnet and other c
 Built from python2 asyncore example
 '''
 
-from selenium.webdriver import Firefox
+# BUILTIN
 import time
 import asyncore
 import socket
 import _thread
-from selenium.common.exceptions import WebDriverException
-
-
 import socket
 
+# SELENIUM
+from selenium.webdriver import Firefox
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.remote.command import Command
 
 
-def get_status(driver):
+def browserClosed(driver):
+    '''check driver for open window handles to stop main loop when broswer is
+    closed'''
     try:
         print(driver.window_handles)
-        return True
-    except WebDriverException:
         return False
+    except WebDriverException:
+        return True
 
 
 class EchoHandler(asyncore.dispatcher_with_send):
+
+    '''handle incoming connections, read data and call JS in broswer using
+    webdriver reference from server'''
 
     def __init__(self, sock, driver):
         asyncore.dispatcher_with_send.__init__(self, sock)
@@ -39,6 +44,7 @@ class EchoHandler(asyncore.dispatcher_with_send):
         self.driver.execute_script(u'document.location.href = "{}";'.format(url))
 
     def browser_handle(self, text):
+        '''parse incoming string and call matching method'''
         commands = {
             'say': self.browser_notify,
             'get': self.browser_get
@@ -46,9 +52,11 @@ class EchoHandler(asyncore.dispatcher_with_send):
 
         for command in commands:
             if text.startswith(command):
+                # put string after command into one argument and call method
                 commands[command](''.join(text.split(' ', 1)[1:]))
 
     def handle_read(self):
+        '''read bytes from socket, expect utf-8 and send to handler'''
         data = self.recv(8192)
         text = data.strip().decode('utf-8', 'ignore')
         if data:
@@ -56,19 +64,19 @@ class EchoHandler(asyncore.dispatcher_with_send):
             self.send(data)
 
 
-class EchoServer(asyncore.dispatcher):
+class CommandServer(asyncore.dispatcher):
 
     def __init__(self, host, port, driver):
         asyncore.dispatcher.__init__(self)
 
         self.driver = driver
-
         self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
         self.set_reuse_addr()
         self.bind((host, port))
         self.listen(5)
 
     def handle_accept(self):
+        '''pass incoming connection and driver reference to handler'''
         pair = self.accept()
         if pair is not None:
             sock, addr = pair
@@ -77,18 +85,26 @@ class EchoServer(asyncore.dispatcher):
 
 
 def runserver(driver):
-    server = EchoServer('localhost', 8080, driver)
+    server = CommandServer('0.0.0.0', 8080, driver)
     asyncore.loop()
 
 
-driver = Firefox()
-driver.get('https://google.de')
+def main():
+    '''start browser and pass webdriver reference to server'''
+    driver = Firefox()
+    driver.get('https://google.de')
 
-_thread.start_new_thread(runserver, (driver, ))
+    # throw server on separate thread
+    _thread.start_new_thread(runserver, (driver, ))
 
-while True:
-    time.sleep(1)
-    if not get_status(driver):
-        break
+    # main loop: exit when browser is closed
+    while True:
+        time.sleep(1)
+        if browserClosed(driver):
+            break
 
-driver.quit()
+    driver.quit()
+
+
+if __name__ == '__main__':
+    main()
